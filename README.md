@@ -181,6 +181,7 @@ Perfect for scripting engines, config files, or small projects.
 * UTF-16 escape sequences (`\uXXXX`) only partially supported
 * Not optimized for performance-critical scenarios
 * Thread-safety is not guaranteed due to possible mutations on access
+* Scientific notation (e.g. 1.1e+10) parsing is very wonky right now
 
 ---
 

@@ -18,7 +18,7 @@
             },
             "dependsOn": "premake configure",
             "args": [
-                "testapp" 
+                "benchmark" 
             ],
             "options": {
                 "cwd": "${workspaceFolder}/build"

@@ -31,3 +31,14 @@ project "testapp"
       "./src/testapp.cpp",
       "./include/**",
    }
+
+project "benchmark"
+   kind "ConsoleApp"
+
+   language "C++"
+   cppdialect "C++17"
+
+   files {
+      "./src/bench.cpp",
+      "./include/**",
+   }

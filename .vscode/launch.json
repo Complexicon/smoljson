@@ -1,11 +1,11 @@
 {
 	"configurations": [
 		{
-			"program": "${workspaceFolder}/bin/Debug/testapp",
+			"program": "${workspaceFolder}/bin/Debug/benchmark",
 			"name": "(gdb) Launch",
 			"type": "cppdbg",
 			"windows": {
-				"program": "${workspaceFolder}/bin/Debug/testapp.exe",
+				"program": "${workspaceFolder}/bin/Debug/benchmark.exe",
 			},
 			"osx": {
 				"MIMode": "lldb",

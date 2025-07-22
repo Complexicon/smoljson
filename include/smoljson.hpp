@@ -6,31 +6,68 @@
 #include <stdexcept>
 #include <variant>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <unordered_map>
 #include <memory>
 #include <algorithm>
 #include <type_traits>
-#include <numeric>
 #include <cmath>
 #include <functional>
+#include <array>
 
 class smoljson {
 
 	/// UTILITIES
+
+	static constexpr size_t total_length() { return 0; }
+	static inline size_t total_length(const std::string_view& s) { return s.size(); }
+
+	template <typename... Args>
+	static size_t total_length(const std::string_view& first, const Args&... args) { return first.size() + total_length(args...); }
+
+	template <typename... Args>
+	static std::string concat(const Args&... args) {
+		std::string result;
+		result.reserve(total_length(std::string_view(args)...));
+		(result.append(args), ...);
+		return result;
+	}
+
 	template <typename Container, typename UnaryFunction>
 	static auto map_container(const Container& input, UnaryFunction func) {
-		std::vector<decltype(func(*input.begin()))> result;
-		result.reserve(input.size());
-		std::transform(input.begin(), input.end(), std::back_inserter(result), func);
+		std::vector<decltype(func(*input.begin()))> result(input.size());
+		std::transform(input.begin(), input.end(), result.begin(), func);
 		return result;
 	}
 
 	static std::string join(const std::vector<std::string>& vec, const std::string& sep) {
-		return vec.empty() ? "" :std::accumulate(std::next(vec.begin()), vec.end(), vec[0],
-			[&sep](const std::string& a, const std::string& b) { return a + sep + b; }
-		);
+		if (vec.empty()) return "";
+		size_t prealloc = vec[0].size();
+
+		for (size_t i = 1; i < vec.size(); i++) {
+			prealloc += sep.size() + vec[i].size();
+		}
+		
+		std::string result;
+		result.reserve(prealloc);
+
+		result.append(vec[0]);
+
+		for (size_t i = 1; i < vec.size(); i++) {
+			result.append(sep);
+			result.append(vec[i]);
+		}
+
+		return result;
 	}
+
+	static constexpr std::array<const char*, 32> control_escapes = {
+		"\\u0000", "\\u0001", "\\u0002", "\\u0003", "\\u0004", "\\u0005", "\\u0006", "\\u0007",
+		"\\b",     "\\t",     "\\n",     "\\u000b", "\\f",     "\\r",     "\\u000e", "\\u000f",
+		"\\u0010", "\\u0011", "\\u0012", "\\u0013", "\\u0014", "\\u0015", "\\u0016", "\\u0017",
+		"\\u0018", "\\u0019", "\\u001a", "\\u001b", "\\u001c", "\\u001d", "\\u001e", "\\u001f"
+	};
 
 	// hack to get template instatiation that failed
 	template<typename> static inline constexpr bool always_false_v = false;
@@ -84,13 +121,15 @@ public:
 			case STRING: value = std::get<std::string>(other.value); break;
 			case NUMBER: value = std::get<double>(other.value); break;
 			case BOOLEAN: value = std::get<bool>(other.value); break;
-			case ARRAY: value = std::get<std::vector<smoljson>>(other.value); break;
+			case ARRAY: value = std::get<array_t>(other.value); break;
 			case OBJECT: {
-				object_t temp;
-				for (const auto& [k, val_ptr] : std::get<object_t>(other.value)) {
+				value = object_t{};
+				object_t& temp = std::get<object_t>(value);
+				const object_t& other_obj = std::get<object_t>(other.value);
+				temp.reserve(other_obj.size());
+				for (const auto& [k, val_ptr] : other_obj) {
 					temp.emplace(k, std::make_unique<smoljson>(*val_ptr));
 				}
-				value = std::move(temp);
 				break;
 			}
 		}
@@ -100,18 +139,19 @@ public:
 	static smoljson array(std::initializer_list<smoljson> items) {
 		smoljson j;
 		j.type = ARRAY;
-		j.value = std::vector<smoljson>(items);
+		j.value = array_t(items);
 		return j;
 	}
 
 	static smoljson object(std::initializer_list<std::pair<std::string, smoljson>> items) {
 		smoljson j;
 		j.type = OBJECT;
-		std::unordered_map<std::string, std::unique_ptr<smoljson>> temp;
-		for (const auto& [k, v] : items) {
-			temp.emplace(k, std::make_unique<smoljson>(v));
+		j.value = object_t{};
+		object_t& temp = std::get<object_t>(j.value);
+		temp.reserve(items.size());
+		for (auto& [k, v] : items) {
+			temp.emplace(k, std::make_unique<smoljson>(std::move(v)));
 		}
-		j.value = std::move(temp);
 		return j;
 	}
 
@@ -299,11 +339,9 @@ public:
 				oss << std::setprecision(15) << dbl;
 				std::string str = oss.str();
 
-				if (str.find('.') != std::string::npos) {
-					str.erase(str.find_last_not_of('0') + 1);
-					if (str.back() == '.') {
-						str.pop_back();
-					}
+				str.erase(str.find_last_not_of('0') + 1, std::string::npos);
+				if (str.back() == '.') {
+					str.pop_back();
 				}
 
 				return str;
@@ -312,28 +350,22 @@ public:
 
 		auto escaped_string = [&]() {
 			const std::string& s = std::get<std::string>(value);
-			std::string result = "\"";
-			for (char c : s) {
-				switch (c) {
-					case '\"': result += "\\\""; break;
-					case '\\': result += "\\\\"; break;
-					case '\b': result += "\\b"; break;
-					case '\f': result += "\\f"; break;
-					case '\n': result += "\\n"; break;
-					case '\r': result += "\\r"; break;
-					case '\t': result += "\\t"; break;
-					default:
-						if (static_cast<unsigned char>(c) < 0x20) {
-							// escape control characters -> \u00XX
-							char buf[7];
-							snprintf(buf, sizeof(buf), "\\u%04x", c & 0xFF);
-							result += buf;
-						} else {
-							result += c;
-						}
+			std::string result;
+			result.reserve(s.size()*2); // guess
+			result += '"';
+			for (unsigned char c : s) {
+				if (c < 0x20) {
+					result.append(control_escapes[c]);
+					continue;
 				}
+
+				if (c == '\\' || c == '"') {
+					result += '\\'; // add escaping backslash for \ and "
+				}
+				
+				result += c;
 			}
-			result += "\"";
+			result += '"';
 			return result;
 		};
 
@@ -347,17 +379,17 @@ public:
 					std::get<array_t>(value),
 					[](const smoljson& json) { return json.serialize(); }
 				);
-				return std::string("[") + join(elements, ",") + "]";
+				return concat("[", join(elements, ","), "]");
 			}
 			case OBJECT: {
 					auto elements = map_container(
 					std::get<object_t>(value), 
 					[](const auto& entry) {
 						auto& [key, value] = entry;
-						return smoljson(key).serialize() + ":" + (*value).serialize();
+						return concat(smoljson(key).serialize(), ":", (*value).serialize());
 					}
 				);
-				return std::string("{") + join(elements, ",") + "}";
+				return concat("{", join(elements, ","), "}");
 			}
 		}
 
@@ -370,34 +402,64 @@ public:
 		// tokenizer and parser.
 		size_t i = 0;
 
+		auto parser_err = [&](const char* message) -> std::runtime_error {
+			size_t offset = std::max(size_t(0), i - 20);
+			auto offending_json = json_literal.substr(offset, 40);
+			offending_json.erase(std::remove(offending_json.begin(), offending_json.end(), '\n'), offending_json.end());
+			offending_json.erase(std::remove(offending_json.begin(), offending_json.end(), '\r'), offending_json.end());
+			return std::runtime_error(concat(
+				message,
+				" at position: ",
+				std::to_string(i),
+				" see here:\n",
+				offending_json
+			));
+		};
+
+		auto is_char = [&](char c) { return i < json_literal.size() && json_literal[i] == c; };
+
 		auto skip_whitespace = [&]() {
 			while (i < json_literal.size() && std::isspace(json_literal[i])) ++i;
 		};
 
 		auto parse_number = [&]() -> double {
 			size_t start = i;
-			if (json_literal[i] == '-') ++i;
-			while (i < json_literal.size() && std::isdigit(json_literal[i])) ++i;
+			auto consoom_numbers = [&] { while (i < json_literal.size() && std::isdigit(json_literal[i])) ++i; };
+			
+			if (is_char('-')) ++i;
+			consoom_numbers();
 			if (i < json_literal.size() && json_literal[i] == '.') {
 				++i;
-				while (i < json_literal.size() && std::isdigit(json_literal[i])) ++i;
+				consoom_numbers();
 			}
+			
+			// scientific notation
+			if (is_char('e') || is_char('E')) {
+				++i;
+				if (is_char('-') || is_char('+')) ++i;
+
+				consoom_numbers();
+
+				if (is_char('.')) {
+					++i;
+					consoom_numbers();
+				}
+			}
+
 			std::string num = json_literal.substr(start, i - start);
 			return std::stod(num); // let the exception bubble on invalid numbers
 		};
 
 		auto parse_string = [&]() -> std::string {
-			if (json_literal[i] != '"') {
-				throw std::runtime_error("Expected opening quote for string");
-			}
 			++i; // skip the opening quote
 			std::string result;
+			result.reserve(100); // based on statistically accurate heuristic (i guessed)
 			while (i < json_literal.size()) {
 				char c = json_literal[i++];
 				if (c == '"') {
 					break;
 				} else if (c == '\\') {
-					if (i >= json_literal.size()) throw std::runtime_error("Invalid escape sequence");
+					if (i >= json_literal.size()) throw parser_err("Invalid escape sequence");
 					char esc = json_literal[i++];
 					switch (esc) {
 						case '"': result += '"'; break;
@@ -409,7 +471,7 @@ public:
 						case 'r': result += '\r'; break;
 						case 't': result += '\t'; break;
 						case 'u': {
-							if (i + 4 > json_literal.size()) throw std::runtime_error("Invalid unicode escape");
+							if (i + 4 > json_literal.size()) throw parser_err("Invalid unicode escape");
 							std::string hex = json_literal.substr(i, 4);
 							i += 4;
 							char16_t unicode_char = static_cast<char16_t>(std::stoi(hex, nullptr, 16));
@@ -422,7 +484,7 @@ public:
 							break;
 						}
 						default:
-							throw std::runtime_error(std::string("Unknown escape character: \\") + esc);
+							throw parser_err("Unknown escape character");
 					}
 				} else {
 					result += c;
@@ -433,7 +495,7 @@ public:
 
 		std::function<smoljson()> parse_value = [&]() -> smoljson {
 			skip_whitespace();
-			if (i >= json_literal.size()) throw std::runtime_error("Unexpected end of input");
+			if (i >= json_literal.size()) throw parser_err("Unexpected end of input");
 
 			char c = json_literal[i];
 			if (c == '"') return smoljson(parse_string());
@@ -449,46 +511,46 @@ public:
 				i += 4; return smoljson(nullptr);
 			}
 			if (c == '[') {
-				++i; skip_whitespace();
+				++i;
+				skip_whitespace();
 				smoljson instance = array({});
 				array_t& arr = instance.as_vector();
-				if (i < json_literal.size() && json_literal[i] == ']') {
+				if (is_char(']')) {
 					++i;
 					return instance;
 				}
 				while (true) {
-					arr.push_back(parse_value());
+					arr.push_back(std::move(parse_value()));
 					skip_whitespace();
-					if (i < json_literal.size() && json_literal[i] == ',') { ++i; skip_whitespace(); continue; }
-					if (i < json_literal.size() && json_literal[i] == ']') { ++i; break; }
-					throw std::runtime_error("Expected ',' or ']'");
+					if (is_char(',')) { ++i;skip_whitespace(); continue; }
+					if (is_char(']')) { ++i; break; }
+					throw parser_err("Expected ',' or ']'");
 				}
 				return instance;
 			}
 			if (c == '{') {
 				++i; skip_whitespace();
-				smoljson instance = object({});
-				object_t& obj = instance.as_map();
-				if (i < json_literal.size() && json_literal[i] == '}') {
+				smoljson obj = object({});
+				if (is_char('}')) {
 					++i;
-					return instance;
+					return obj;
 				}
 				while (true) {
-					if (i < json_literal.size() && json_literal[i] != '"') throw std::runtime_error("Expected string key");
+					if (i < json_literal.size() && json_literal[i] != '"') throw parser_err("Expected string key");
 					std::string key = parse_string();
 					skip_whitespace();
-					if (i < json_literal.size() && json_literal[i] != ':') throw std::runtime_error("Expected ':'");
+					if (i < json_literal.size() && json_literal[i] != ':') throw parser_err("Expected ':'");
 					++i; skip_whitespace();
-					obj[key] = std::make_unique<smoljson>(parse_value());
+					obj[key] = parse_value();
 					skip_whitespace();
-					if (i < json_literal.size() && json_literal[i] == ',') { ++i; skip_whitespace(); continue; }
-					if (i < json_literal.size() && json_literal[i] == '}') { ++i; break; }
-					throw std::runtime_error("Expected ',' or '}'");
+					if (is_char(',')) { ++i; skip_whitespace(); continue; }
+					if (is_char('}')) { ++i; break; }
+					throw parser_err("Expected ',' or '}'");
 				}
-				return instance;
+				return obj;
 			}
 
-			throw std::runtime_error(std::string("Unexpected character: ") + c);
+			throw parser_err("Unexpected character");
 		};
 
 		return parse_value();
