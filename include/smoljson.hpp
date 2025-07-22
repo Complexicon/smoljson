@@ -403,7 +403,7 @@ public:
 		size_t i = 0;
 
 		auto parser_err = [&](const char* message) -> std::runtime_error {
-			size_t offset = std::max(size_t(0), i - 20);
+			size_t offset = i - 20 > json_literal.size() ? 0 : i - 20;
 			auto offending_json = json_literal.substr(offset, 40);
 			offending_json.erase(std::remove(offending_json.begin(), offending_json.end(), '\n'), offending_json.end());
 			offending_json.erase(std::remove(offending_json.begin(), offending_json.end(), '\r'), offending_json.end());
