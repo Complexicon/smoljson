@@ -20,16 +20,10 @@ class smoljson {
 
 	/// UTILITIES
 
-	static constexpr size_t total_length() { return 0; }
-	static inline size_t total_length(const std::string_view& s) { return s.size(); }
-
-	template <typename... Args>
-	static size_t total_length(const std::string_view& first, const Args&... args) { return first.size() + total_length(args...); }
-
 	template <typename... Args>
 	static std::string concat(const Args&... args) {
 		std::string result;
-		result.reserve(total_length(std::string_view(args)...));
+		result.reserve((std::string_view(args).size() + ...));
 		(result.append(args), ...);
 		return result;
 	}
