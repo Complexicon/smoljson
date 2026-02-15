@@ -20,6 +20,13 @@
 
 ---
 
+## ⚠️ Heads Up
+
+This repository is a **toy project** to help me learn and explore the process of writing a fast and efficient parser/serializer.
+It's not intended to "compete" with `nlohmann::json` or [DaveGamble's cJSON](https://github.com/DaveGamble/cJSON) (props to these guys)
+
+---
+
 ## 🔧 Installation
 
 Just drop [`smoljson.hpp`](./include/smoljson.hpp) into your project.
@@ -186,5 +193,6 @@ Perfect for scripting engines, config files, or small projects.
 ---
 
 ## 📄 License
+
 
 **MIT** — free to use, modify, and distribute.
